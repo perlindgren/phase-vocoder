@@ -36,6 +36,7 @@ pub struct TimeStretcher {
     frame_size: usize,
     overlap: usize,
     sample_rate: usize,
+    stretch_factor: f32,
 }
 
 impl TimeStretcher {

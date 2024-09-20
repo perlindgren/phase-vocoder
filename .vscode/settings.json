@@ -1,0 +1,10 @@
+{
+    "cSpell.ignoreWords": [
+        "Vocoding",
+        "consts",
+        "ffft",
+        "ifft",
+        "realfft",
+        "rustfft"
+    ]
+}

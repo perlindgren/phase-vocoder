@@ -1,7 +1,7 @@
 fs = 48000; % sample frequncy
 x = 1:fs; % sample size
 
-f_ot = 8; % third overton
+f_ot = 1; % 8 = third overtone
 
 f_sch = 82.41 * f_ot; % frequency to analyze, low E guitarr
 
@@ -53,11 +53,11 @@ hold off;
 figure(4);
 clf;
 hold on;
-plot(abs(c), '-b');
+plot(abs(c) / ws, '-b');
 % plot(real(c), '-r');
 % plot(imag(c), '-g');
 
-plot(abs(c2), '-r');
+plot(abs(c2) / ws, '-r');
 hold off;
 
 % plot(han, '-b');

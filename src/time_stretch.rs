@@ -1,4 +1,4 @@
-// original code from https://github.com/NathanRoyer/pitch_shift
+// Similar to https://github.com/NathanRoyer/pitch_shift, but with the goal to time stretch instead
 
 use realfft::num_complex::Complex;
 use realfft::ComplexToReal;
@@ -13,8 +13,8 @@ use std::f32::consts::TAU; // = 2xPI
 type SampleReal = f32;
 const COMPLEX_ZERO: Complex<SampleReal> = Complex::new(0.0, 0.0);
 
-/// See [`PitchShifter::new`] & [`PitchShifter::shift_pitch`]
-pub struct PitchShifter {
+/// See [`TimeStretcher::new`] & [`TimeStretcher::shift_pitch`]
+pub struct TimeStretcher {
     forward_fft: RealToComplexEven<SampleReal>,
     inverse_fft: ComplexToRealEven<SampleReal>,
     ffft_scratch_len: usize,
@@ -36,21 +36,22 @@ pub struct PitchShifter {
     frame_size: usize,
     overlap: usize,
     sample_rate: usize,
+    stretch_factor: f32,
 }
 
-impl PitchShifter {
+impl TimeStretcher {
     /// Phase Vocoding works by extracting overlapping windows
     /// from a buffer and processing them individually before
     /// merging the results into the output buffer.
     ///
-    /// You must set a duration in miliseconds for these windows;
+    /// You must set a duration in milliseconds for these windows;
     /// 50ms is a good value.
     ///
     /// The sample rate argument must correspond to the sample
     /// rate of the buffer(s) you will provide to
-    /// [`PitchShifter::shift_pitch`], which is how many values
+    /// [`TimeStretcher::shift_pitch`], which is how many values
     /// correspond to one second of audio in the buffer.
-    pub fn new(window_duration_ms: usize, sample_rate: usize) -> Self {
+    pub fn new(window_duration_ms: usize, sample_rate: usize, stretch_factor: f32) -> Self {
         let mut frame_size = sample_rate * window_duration_ms / 1000;
         frame_size += frame_size % 2;
         let fs_real = frame_size as SampleReal;
@@ -92,6 +93,7 @@ impl PitchShifter {
             frame_size,
             overlap: 0,
             sample_rate,
+            stretch_factor,
         }
     }
 
@@ -101,15 +103,12 @@ impl PitchShifter {
     /// process, but the better the results. I put `16` in the
     /// `shift-wav` binary.
     ///
-    /// `shift` is how many semitones to apply to the buffer.
-    /// It is signed: a negative value will lower the tone and
-    /// vice-versa.
     ///
     /// `in_b` is where the input buffer goes, and you must pass
-    /// an output buffer of the same length in `out_b`.
+    /// an output buffer `out_b` of size in_b * stretch_factor 
     ///
     /// Note: It's actually not magic, sadly.
-    pub fn shift_pitch(
+    pub fn time_stretch(
         &mut self,
         over_sampling: usize,
         shift: SampleReal,

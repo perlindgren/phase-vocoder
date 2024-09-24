@@ -1,10 +1,12 @@
 {
-    "cSpell.ignoreWords": [
-        "Vocoding",
-        "consts",
-        "ffft",
-        "ifft",
-        "realfft",
-        "rustfft"
-    ]
+  "cSpell.ignoreWords": [
+    "Vocoding",
+    "consts",
+    "cplx",
+    "ffft",
+    "ifft",
+    "oversamp",
+    "realfft",
+    "rustfft"
+  ]
 }

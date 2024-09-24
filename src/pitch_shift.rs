@@ -1,4 +1,4 @@
-// Similar to https://github.com/NathanRoyer/pitch_shift, but with the goal to time stretch instead
+// original code from https://github.com/NathanRoyer/pitch_shift
 
 use realfft::num_complex::Complex;
 use realfft::ComplexToReal;
@@ -13,8 +13,8 @@ use std::f32::consts::TAU; // = 2xPI
 type SampleReal = f32;
 const COMPLEX_ZERO: Complex<SampleReal> = Complex::new(0.0, 0.0);
 
-/// See [`TimeStretcher::new`] & [`TimeStretcher::shift_pitch`]
-pub struct TimeStretcher {
+/// See [`PitchShifter::new`] & [`PitchShifter::shift_pitch`]
+pub struct PitchShifter {
     forward_fft: RealToComplexEven<SampleReal>,
     inverse_fft: ComplexToRealEven<SampleReal>,
     ffft_scratch_len: usize,
@@ -36,10 +36,9 @@ pub struct TimeStretcher {
     frame_size: usize,
     overlap: usize,
     sample_rate: usize,
-    stretch_factor: f32,
 }
 
-impl TimeStretcher {
+impl PitchShifter {
     /// Phase Vocoding works by extracting overlapping windows
     /// from a buffer and processing them individually before
     /// merging the results into the output buffer.
@@ -49,11 +48,11 @@ impl TimeStretcher {
     ///
     /// The sample rate argument must correspond to the sample
     /// rate of the buffer(s) you will provide to
-    /// [`TimeStretcher::shift_pitch`], which is how many values
+    /// [`PitchShifter::shift_pitch`], which is how many values
     /// correspond to one second of audio in the buffer.
     pub fn new(window_duration_ms: usize, sample_rate: usize) -> Self {
         let mut frame_size = sample_rate * window_duration_ms / 1000;
-        frame_size += frame_size % 2;
+        frame_size += frame_size % 2; // even sized
         let fs_real = frame_size as SampleReal;
 
         let double_frame_size = frame_size * 2;

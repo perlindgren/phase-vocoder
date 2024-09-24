@@ -40,7 +40,7 @@ mod test {
     #[test]
     fn test_realfft() {
         const FS: usize = 1000;
-        let f = 10.0;
+        let f = 15.0;
 
         let mut in_data = gen_sin(f, FS, FS);
         write_csv(&in_data, &"in.data");
@@ -61,7 +61,7 @@ mod test {
         write_csv(&fft_norm, &"in-fft-norm.data");
 
         // naive time stretching
-        let stretch = 2.0;
+        let stretch = 2.5;
         let stretch_len = (FS as f32 * stretch) as usize;
         let ifft_cr = planner.plan_fft_inverse(stretch_len);
         let mut ifft_spectrum = ifft_cr.make_input_vec(); // zeroes
@@ -73,34 +73,21 @@ mod test {
         );
 
         // stretch time
-        ifft_spectrum
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, bin_out)| {
-                let from_bin: f32 = i as f32 / stretch; // in original fft
-                let left = from_bin.floor();
-                let right = (from_bin + 1.0).floor();
-                let left_weight = 1.0 - (from_bin - left).abs();
-                let right_weight = 1.0 - (from_bin - right).abs();
-                // println!("i {}, to_bin {}", i, to_bin);
-                let left_sample = if let Some(r) = in_fft.get(left as usize) {
-                    r.to_owned()
-                } else {
-                    Complex::zero()
-                };
-                let right_sample = if let Some(r) = in_fft.get(right as usize) {
-                    r.to_owned()
-                } else {
-                    Complex::zero()
-                };
+        in_fft.iter().enumerate().for_each(|(i, bin_in)| {
+            let unwrapped_phase = i as f32 * TAU + bin_in.arg();
+            let new_phase = unwrapped_phase * stretch;
+            let new_frequency = new_phase / TAU;
+            let to_bin = new_frequency.round();
+            let new_phase_principal = new_phase % TAU;
 
-                *bin_out = left_sample * left_weight + right_sample * right_weight;
+            ifft_spectrum[to_bin as usize] =
+                Complex::from_polar(bin_in.norm(), new_phase_principal);
 
-                // println!(
-                //     "i {}, to_bin {}, left {}, right {}, left_weight {}, right_weight {}",
-                //     i, to_bin, left, right, left_weight, right_weight
-                // );
-            });
+            // println!(
+            //     "i {}, to_bin {}, left {}, right {}, left_weight {}, right_weight {}",
+            //     i, to_bin, left, right, left_weight, right_weight
+            // );
+        });
 
         let fft_norm2: Vec<_> = ifft_spectrum
             .iter()

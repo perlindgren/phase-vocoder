@@ -40,65 +40,91 @@ mod test {
     #[test]
     fn test_realfft() {
         const FS: usize = 1000;
-        let f = 100.0;
+        let f = 10.0;
 
-        let mut sin_100 = gen_sin(f, FS, FS);
-        write_csv(&sin_100, &"sin_100.data");
+        let mut in_data = gen_sin(f, FS, FS);
+        write_csv(&in_data, &"in.data");
 
         let mut planner = RealFftPlanner::new();
         let fft_r2c = planner.plan_fft_forward(FS);
-        let mut spectrum = fft_r2c.make_output_vec();
+        let mut in_fft = fft_r2c.make_output_vec();
 
-        fft_r2c.process(&mut sin_100, &mut spectrum).unwrap();
+        fft_r2c.process(&mut in_data, &mut in_fft).unwrap();
 
         println!(
-            "data length {}, spectrum length {}",
-            sin_100.len(),
-            spectrum.len()
+            "in data length {}, in fft length {}",
+            in_data.len(),
+            in_fft.len()
         );
 
-        let fft_norm: Vec<_> = spectrum.iter().map(|c| c.norm()).collect();
+        let fft_norm: Vec<_> = in_fft.iter().map(|c| c.norm() / FS as f32).collect();
+        write_csv(&fft_norm, &"in-fft-norm.data");
 
-        let mut spectrum2 = fft_r2c.make_output_vec(); // zeroes
-
-        let shift = 0.5;
-        // shift spectrum
-        spectrum2.iter_mut().enumerate().for_each(|(i, bin_out)| {
-            let to_bin: f32 = i as f32 * shift;
-            let left = to_bin.floor();
-            let right = (to_bin + 1.0).floor();
-            let left_weight = 1.0 - (to_bin - left).abs();
-            let right_weight = 1.0 - (to_bin - right).abs();
-            // println!("i {}, to_bin {}", i, to_bin);
-            let left_sample = if let Some(r) = spectrum.get(left as usize) {
-                r.to_owned()
-            } else {
-                Complex::zero()
-            };
-            let right_sample = if let Some(r) = spectrum.get(right as usize) {
-                r.to_owned()
-            } else {
-                Complex::zero()
-            };
-
-            *bin_out = left_sample * left_weight + right_sample * right_weight;
-
-            // println!(
-            //     "i {}, to_bin {}, left {}, right {}, left_weight {}, right_weight {}",
-            //     i, to_bin, left, right, left_weight, right_weight
-            // );
-        });
-
-        let fft_norm2: Vec<_> = spectrum2.iter().map(|c| c.norm()).collect();
-
-        let ifft_cr = planner.plan_fft_inverse(FS);
+        // naive time stretching
+        let stretch = 2.0;
+        let stretch_len = (FS as f32 * stretch) as usize;
+        let ifft_cr = planner.plan_fft_inverse(stretch_len);
+        let mut ifft_spectrum = ifft_cr.make_input_vec(); // zeroes
         let mut ifft_data = ifft_cr.make_output_vec();
+        println!(
+            "ifft_data length {}, spectrum2 (stretched) length {}",
+            ifft_data.len(),
+            ifft_spectrum.len()
+        );
 
-        ifft_cr.process(&mut spectrum2, &mut ifft_data); // .unwrap();
+        // stretch time
+        ifft_spectrum
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, bin_out)| {
+                let from_bin: f32 = i as f32 / stretch; // in original fft
+                let left = from_bin.floor();
+                let right = (from_bin + 1.0).floor();
+                let left_weight = 1.0 - (from_bin - left).abs();
+                let right_weight = 1.0 - (from_bin - right).abs();
+                // println!("i {}, to_bin {}", i, to_bin);
+                let left_sample = if let Some(r) = in_fft.get(left as usize) {
+                    r.to_owned()
+                } else {
+                    Complex::zero()
+                };
+                let right_sample = if let Some(r) = in_fft.get(right as usize) {
+                    r.to_owned()
+                } else {
+                    Complex::zero()
+                };
 
-        write_csv(&fft_norm, &"spectrum.data");
-        write_csv(&fft_norm2, &"spectrum2.data");
-        write_csv(&ifft_data, &"ifft.data");
+                *bin_out = left_sample * left_weight + right_sample * right_weight;
+
+                // println!(
+                //     "i {}, to_bin {}, left {}, right {}, left_weight {}, right_weight {}",
+                //     i, to_bin, left, right, left_weight, right_weight
+                // );
+            });
+
+        let fft_norm2: Vec<_> = ifft_spectrum
+            .iter()
+            .map(|c| c.norm() / stretch_len as f32)
+            .collect();
+
+        write_csv(&fft_norm2, &"stretched-fft-norm.data");
+
+        let _ = ifft_cr.process(&mut ifft_spectrum, &mut ifft_data); // .unwrap();
+
+        write_csv(&ifft_data, &"stretched.data");
+
+        // and back again
+        let fft_r2c = planner.plan_fft_forward(FS);
+        let mut spectrum = fft_r2c.make_output_vec();
+
+        fft_r2c
+            .process(&mut ifft_data[0..FS], &mut spectrum)
+            .unwrap();
+        let fft_norm: Vec<_> = spectrum
+            .iter()
+            .map(|c| c.norm() / stretch_len as f32)
+            .collect();
+        write_csv(&fft_norm, &"stretched-data-fft-norm.data");
     }
 }
 

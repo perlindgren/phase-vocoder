@@ -26,6 +26,50 @@ where
     data.iter().for_each(|k| write!(file, "{},", k).unwrap());
 }
 
+// Following the ideas for a phase vocoder, along following steps
+//
+// 1) incoming samples are stored in an frame buffer holding the latest N samples
+//
+// 2) we compute the fft (spectrum) of frame is computed (input frame in frequency domain)
+//
+// 3) the spectrum is stretched (taking new phase into account)
+//
+// 4) we compute the inverse fft (ifft) to a corresponding (output frame in time domain)
+//
+// 5) we overlap and add the generated frame to the output buffer
+//
+// The amount of overlap is determined by the hop_size (equal to the number samples provided)
+// The current implementation does not take into account phase correlation between
+// overlapping frames, generating audible artifacts.
+//
+// The frame size determines the frequency resolution (nr of bins in the fft).
+
+//  for (i, sample) in samples.iter().enumerate().iter {
+//         let two_pi_i = TAU * i as f32;
+//         let idontknowthename = cosf(two_pi_i / samples_len_f32);
+//         let multiplier = 0.5 * (1.0 - idontknowthename);
+//         windowed_samples.push(multiplier * sample)
+//     }
+
+#[inline(always)]
+pub fn hann_window<const N: usize>(in_samples: &[f32; N], out_samples: &mut [f32; N]) {
+    in_samples
+        .iter()
+        .zip(out_samples.iter_mut())
+        .enumerate()
+        .for_each(|(i, (in_s, out_s))| {
+            *out_s = *in_s * 0.5 * (1.0 - (TAU * i as f32 / N as f32).cos())
+        });
+}
+
+#[test]
+fn test_hann() {
+    let in_samples = [1.0; 64];
+    let mut out_samples = [0.0; 64];
+    hann_window(&in_samples, &mut out_samples);
+    println!("{:?}", out_samples);
+}
+
 pub struct Stretch {
     sample_rate: usize,
     frame_time: f32,

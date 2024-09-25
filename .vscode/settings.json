@@ -4,6 +4,7 @@
     "consts",
     "cplx",
     "ffft",
+    "hann",
     "ifft",
     "oversamp",
     "realfft",

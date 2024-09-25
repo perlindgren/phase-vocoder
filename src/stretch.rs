@@ -43,32 +43,7 @@ where
 // overlapping frames, generating audible artifacts.
 //
 // The frame size determines the frequency resolution (nr of bins in the fft).
-
-//  for (i, sample) in samples.iter().enumerate().iter {
-//         let two_pi_i = TAU * i as f32;
-//         let idontknowthename = cosf(two_pi_i / samples_len_f32);
-//         let multiplier = 0.5 * (1.0 - idontknowthename);
-//         windowed_samples.push(multiplier * sample)
-//     }
-
-#[inline(always)]
-pub fn hann_window<const N: usize>(in_samples: &[f32; N], out_samples: &mut [f32; N]) {
-    in_samples
-        .iter()
-        .zip(out_samples.iter_mut())
-        .enumerate()
-        .for_each(|(i, (in_s, out_s))| {
-            *out_s = *in_s * 0.5 * (1.0 - (TAU * i as f32 / N as f32).cos())
-        });
-}
-
-#[test]
-fn test_hann() {
-    let in_samples = [1.0; 64];
-    let mut out_samples = [0.0; 64];
-    hann_window(&in_samples, &mut out_samples);
-    println!("{:?}", out_samples);
-}
+//
 
 pub struct Stretch {
     sample_rate: usize,
@@ -81,6 +56,7 @@ pub struct Stretch {
     ifft_cr: Arc<dyn ComplexToReal<f32>>,
     ifft_in: Vec<Complex<f32>>,
     ifft_out: Vec<f32>,
+    out_accumulator: Vec<f32>,
 }
 
 impl Stretch {
@@ -97,6 +73,7 @@ impl Stretch {
         let ifft_out = ifft_cr.make_output_vec();
         let ifft_in = ifft_cr.make_input_vec();
 
+        let out_accumulator = vec![0.0; out_frame_size * 2];
         Self {
             sample_rate,
             frame_time,
@@ -108,10 +85,29 @@ impl Stretch {
             ifft_cr,
             ifft_in,
             ifft_out,
+            out_accumulator,
         }
     }
 
-    pub fn stretch(&mut self, in_samples: &[f32], out_sample: &mut [f32]) {
+    // in_buffer              |            |k         | << k = in_samples.len()
+    //                        |k           |in_samples|
+    //
+    // fft_in [hann]          |f32, f32, ...          | (in_frame_size)
+    // fft_out                |..., cn, ...           | (in_frame_size)
+    //
+    // ifft_in                |..., ..., stretch_factor *cn, ...| (out_frame_size)
+    // ifft_out               |f32, f32, ...                    | (out_frame_size)
+    //
+    // accumulator |                                           x| << hop
+    //             |                                 x, 0, 0, 0 | scale by 0.5
+    // + ifft_out [hann]      |                                 | scale by 0.5
+    // out_buffer  |                                  |
+    //
+    // hop = ifft_out, no overlap
+    // hop = ifft_out/2, average over 2 frames
+    // hop = ifft_out/n, average over n frames
+
+    pub fn stretch(&mut self, in_samples: &[f32], hop: f32, out_sample: &mut [f32]) {
         // push in_samples into buffer
         let in_buffer_len = self.in_buffer.len();
         self.in_buffer.copy_within(in_samples.len().., 0);
@@ -135,6 +131,8 @@ impl Stretch {
         });
 
         let _ = self.ifft_cr.process(&mut self.ifft_in, &mut self.ifft_out); // .unwrap();
+
+        // self.out_accumulator.copy_within(src, dest);
     }
 }
 
@@ -173,7 +171,7 @@ mod test {
 
         let in_samples = [1.0; NR_IN_SAMPLES];
         let mut out_samples = [0.0; NR_OUT_SAMPLES];
-        stretch.stretch(&in_samples, &mut out_samples);
+        stretch.stretch(&in_samples, 1.0, &mut out_samples);
         assert_eq!(
             stretch.in_buffer[0..IN_LEN - NR_IN_SAMPLES],
             [0.0; IN_LEN - NR_IN_SAMPLES]
@@ -187,7 +185,7 @@ mod test {
         let mut out_samples_2 = [0.0; NR_OUT_SAMPLES_2];
 
         println!("IN_LEN {}", IN_LEN);
-        stretch.stretch(&in_samples_2, &mut out_samples_2);
+        stretch.stretch(&in_samples_2, 1.0, &mut out_samples_2);
 
         assert_eq!(
             stretch.in_buffer[0..IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)],

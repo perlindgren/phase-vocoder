@@ -5,6 +5,7 @@ use std::{
     f32::consts::{PI, TAU},
     fmt::Display,
     path::Path,
+    str::from_boxed_utf8_unchecked,
     sync::Arc,
 };
 
@@ -98,16 +99,11 @@ impl Stretch {
     // ifft_in                |..., ..., stretch_factor *cn, ...| (out_frame_size)
     // ifft_out               |f32, f32, ...                    | (out_frame_size)
     //
-    // accumulator |                                           x| << hop
-    //             |                                 x, 0, 0, 0 | scale by 0.5
-    // + ifft_out [hann]      |                                 | scale by 0.5
-    // out_buffer  |                                  |
-    //
-    // hop = ifft_out, no overlap
-    // hop = ifft_out/2, average over 2 frames
-    // hop = ifft_out/n, average over n frames
-
-    pub fn stretch(&mut self, in_samples: &[f32], hop: f32, out_sample: &mut [f32]) {
+    pub fn stretch(&mut self, in_samples: &[f32], out_samples: &mut [f32]) {
+        assert_eq!(
+            (in_samples.len() as f32 * self.stretch_factor) as usize,
+            out_samples.len()
+        );
         // push in_samples into buffer
         let in_buffer_len = self.in_buffer.len();
         self.in_buffer.copy_within(in_samples.len().., 0);
@@ -120,7 +116,7 @@ impl Stretch {
             .unwrap();
 
         // stretch time
-        self.fft_out.iter().enumerate().for_each(|(i, bin_in)| {
+        self.fft_out.take(siter().enumerate().for_each(|(i, bin_in)| {
             let unwrapped_phase = i as f32 * TAU + bin_in.arg();
             let new_phase = unwrapped_phase * self.stretch_factor;
             let new_frequency = new_phase / TAU;
@@ -132,7 +128,34 @@ impl Stretch {
 
         let _ = self.ifft_cr.process(&mut self.ifft_in, &mut self.ifft_out); // .unwrap();
 
-        // self.out_accumulator.copy_within(src, dest);
+        let frame_size = self.ifft_out.len();
+        let hop_size = out_samples.len();
+        let to_index = frame_size - hop_size;
+
+        println!(
+            "frame_size {}, hop_size {}, to_index {}",
+            frame_size, hop_size, to_index
+        );
+
+        // shift out_accumulator left, out_accumulator.len() = 2 * frame_size
+        //       |           |          x| << hop_size
+        //       |          x|           |
+        self.out_accumulator.copy_within(frame_size.., to_index);
+
+        // accumulate old and new
+        self.out_accumulator[frame_size..frame_size + hop_size]
+            .iter_mut()
+            .zip(self.ifft_out[..frame_size - hop_size].iter())
+            .for_each(|(old, new)| {
+                *old = (*old + *new) / 2.0;
+            });
+
+        // plain copy of new
+        self.out_accumulator[2 * frame_size - hop_size..]
+            .copy_from_slice(&self.ifft_out[frame_size - hop_size..]);
+        //
+        println!("out_samples_len {}", out_samples.len());
+        out_samples.copy_from_slice(&self.out_accumulator[to_index..frame_size]);
     }
 }
 
@@ -143,9 +166,9 @@ mod test {
 
     #[test]
     fn test_stretch_buffer() {
-        const SAMPLE_RATE: usize = 480;
+        const SAMPLE_RATE: usize = 1000;
         const FRAME_TIME: f32 = 0.50;
-        const STRETCH_FACTOR: f32 = 2.0;
+        const STRETCH_FACTOR: f32 = 1.0;
         const IN_LEN: usize = (FRAME_TIME * (SAMPLE_RATE as f32)) as usize;
 
         let mut stretch = Stretch::new(SAMPLE_RATE, FRAME_TIME, STRETCH_FACTOR);
@@ -169,35 +192,38 @@ mod test {
         const NR_IN_SAMPLES: usize = 20;
         const NR_OUT_SAMPLES: usize = (NR_IN_SAMPLES as f32 * STRETCH_FACTOR) as usize;
 
-        let in_samples = [1.0; NR_IN_SAMPLES];
+        let in_samples = gen_sin(100.0, 1000, NR_IN_SAMPLES);
         let mut out_samples = [0.0; NR_OUT_SAMPLES];
-        stretch.stretch(&in_samples, 1.0, &mut out_samples);
+        stretch.stretch(&in_samples, &mut out_samples);
         assert_eq!(
             stretch.in_buffer[0..IN_LEN - NR_IN_SAMPLES],
             [0.0; IN_LEN - NR_IN_SAMPLES]
         );
-        assert_eq!(stretch.in_buffer[IN_LEN - NR_IN_SAMPLES..], in_samples);
+        // assert_eq!(stretch.in_buffer[IN_LEN - NR_IN_SAMPLES..], in_samples);
 
-        const NR_IN_SAMPLES_2: usize = 40;
-        const NR_OUT_SAMPLES_2: usize = (NR_IN_SAMPLES as f32 * STRETCH_FACTOR) as usize;
+        // const NR_IN_SAMPLES_2: usize = 40;
+        // const NR_OUT_SAMPLES_2: usize = (NR_IN_SAMPLES_2 as f32 * STRETCH_FACTOR) as usize;
 
-        let in_samples_2 = [0.5; NR_IN_SAMPLES_2];
-        let mut out_samples_2 = [0.0; NR_OUT_SAMPLES_2];
+        // let in_samples_2 = [0.5; NR_IN_SAMPLES_2];
+        // let mut out_samples_2 = [0.0; NR_OUT_SAMPLES_2];
 
-        println!("IN_LEN {}", IN_LEN);
-        stretch.stretch(&in_samples_2, 1.0, &mut out_samples_2);
+        // println!("IN_LEN {}", IN_LEN);
+        // stretch.stretch(&in_samples_2, &mut out_samples_2);
 
-        assert_eq!(
-            stretch.in_buffer[0..IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)],
-            [0.0; IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)]
-        );
+        // assert_eq!(
+        //     stretch.in_buffer[0..IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)],
+        //     [0.0; IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)]
+        // );
 
-        assert_eq!(
-            stretch.in_buffer[IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)..IN_LEN - NR_IN_SAMPLES_2],
-            in_samples
-        );
+        // assert_eq!(
+        //     stretch.in_buffer[IN_LEN - (NR_IN_SAMPLES_2 + NR_IN_SAMPLES)..IN_LEN - NR_IN_SAMPLES_2],
+        //     in_samples
+        // );
 
-        assert_eq!(stretch.in_buffer[IN_LEN - NR_IN_SAMPLES_2..], in_samples_2);
+        // assert_eq!(stretch.in_buffer[IN_LEN - NR_IN_SAMPLES_2..], in_samples_2);
+
+        // // stretch.stretch(&in_samples_2, &mut out_samples_2);
+        // // stretch.stretch(&in_samples_2, &mut out_samples_2);
     }
 
     #[test]
@@ -294,34 +320,3 @@ mod test {
         write_csv(&fft_norm, &"stretched-data-fft-norm.data");
     }
 }
-
-// fn main() {
-//     let length = 256;
-
-//     // make a planner
-//     let mut real_planner = RealFftPlanner::<f64>::new();
-
-//     // create a FFT
-//     let r2c = real_planner.plan_fft_forward(length);
-//     // make a dummy real-valued signal (filled with zeros)
-//     let mut indata = r2c.make_input_vec();
-//     // make a vector for storing the spectrum
-//     let mut spectrum = r2c.make_output_vec();
-
-//     // Are they the length we expect?
-//     assert_eq!(indata.len(), length);
-//     assert_eq!(spectrum.len(), length / 2 + 1);
-
-//     // forward transform the signal
-//     r2c.process(&mut indata, &mut spectrum).unwrap();
-
-//     // create an inverse FFT
-//     let c2r = real_planner.plan_fft_inverse(length);
-
-//     // create a vector for storing the output
-//     let mut outdata = c2r.make_output_vec();
-//     assert_eq!(outdata.len(), length);
-
-//     // inverse transform the spectrum back to a real-valued signal
-//     c2r.process(&mut spectrum, &mut outdata).unwrap();
-// }

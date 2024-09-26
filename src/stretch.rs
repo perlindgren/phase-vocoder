@@ -98,8 +98,8 @@ impl Stretch {
         self.in_buffer.copy_within(in_samples.len().., 0);
         self.in_buffer[in_buffer_len - in_samples.len()..].copy_from_slice(in_samples);
 
-        // self.fft_in.copy_from_slice(&self.in_buffer);
-        self.fft_in = window::hann_window(&self.in_buffer);
+        self.fft_in.copy_from_slice(&self.in_buffer);
+        // self.fft_in = window::hann_window(&self.in_buffer);
 
         self.fft_r2c
             .process(&mut self.fft_in, &mut self.fft_out)

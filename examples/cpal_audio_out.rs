@@ -44,9 +44,10 @@ fn play(device: &cpal::Device, file: File) {
         buffer_size: cpal::BufferSize::Fixed(1024), // 256 f32
     };
 
-    let stretch_factor = 1.5;
+    let stretch_factor = 2.0;
+    let frame_time = 1.00;
     println!("sample_rate {}", sample_rate);
-    let mut stretch = Stretch::new(sample_rate as usize, 0.025, stretch_factor);
+    let mut stretch = Stretch::new(sample_rate as usize, frame_time, stretch_factor);
 
     println!("Config: {:?}", config);
     let err_fn = |err| eprintln!("Error:{}", err);
@@ -57,13 +58,17 @@ fn play(device: &cpal::Device, file: File) {
         .build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let in_slice = &mut in_samples[..(data.len() as f32 / stretch_factor) as usize];
-                println!("data len {}, in_slice len {}, ", data.len(), in_slice.len());
-                in_slice
-                    .iter_mut()
-                    .for_each(|in_s| *in_s = track.next_sample());
-                stretch.stretch(in_slice, data);
-                // write_data(data, track.channels, &mut || track.next_sample())
+                if data.len() > (sample_rate as f32 * frame_time) as usize {
+                    println!("too big");
+                } else {
+                    let in_slice = &mut in_samples[..(data.len() as f32 / stretch_factor) as usize];
+                    println!("data len {}, in_slice len {}, ", data.len(), in_slice.len());
+                    in_slice
+                        .iter_mut()
+                        .for_each(|in_s| *in_s = track.next_sample());
+                    stretch.stretch(in_slice, data);
+                    // write_data(data, track.channels, &mut || track.next_sample())
+                }
             },
             err_fn,
             None,

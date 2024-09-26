@@ -1,31 +1,7 @@
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use rustfft::num_complex::Complex;
-use rustfft::num_traits::Zero;
-use std::{
-    f32::consts::{PI, TAU},
-    fmt::Display,
-    path::Path,
-    str::from_boxed_utf8_unchecked,
-    sync::Arc,
-};
 
-use std::fs::File;
-use std::io::prelude::*;
-
-pub fn gen_sin(f: f32, fs: usize, len: usize) -> Vec<f32> {
-    (0..len)
-        .map(|k| (k as f32 * f * TAU / fs as f32).sin())
-        .collect()
-}
-
-pub fn write_csv<T>(data: &Vec<T>, path: &impl AsRef<Path>)
-where
-    T: Display,
-{
-    let mut file = File::create(path).unwrap();
-
-    data.iter().for_each(|k| write!(file, "{},", k).unwrap());
-}
+use std::{f32::consts::TAU, sync::Arc};
 
 // Following the ideas for a phase vocoder, along following steps
 //
@@ -100,12 +76,11 @@ impl Stretch {
     // ifft_out               |f32, f32, ...                    | (out_frame_size)
     //
     pub fn stretch(&mut self, in_samples: &[f32], out_samples: &mut [f32]) {
-        assert_eq!(
-            (in_samples.len() as f32 * self.stretch_factor) as usize,
-            out_samples.len()
-        );
+        assert!((in_samples.len() as f32 * self.stretch_factor) as usize == out_samples.len());
         // push in_samples into buffer
         let in_buffer_len = self.in_buffer.len();
+        // check that in_samples fit in buffer
+        assert!(in_samples.len() <= in_buffer_len);
         self.in_buffer.copy_within(in_samples.len().., 0);
         self.in_buffer[in_buffer_len - in_samples.len()..].copy_from_slice(in_samples);
 
@@ -116,15 +91,20 @@ impl Stretch {
             .unwrap();
 
         // stretch time
-        self.fft_out.take(siter().enumerate().for_each(|(i, bin_in)| {
-            let unwrapped_phase = i as f32 * TAU + bin_in.arg();
-            let new_phase = unwrapped_phase * self.stretch_factor;
-            let new_frequency = new_phase / TAU;
-            let to_bin = new_frequency.round();
-            let new_phase_principal = new_phase % TAU;
+        self.fft_out
+            .iter()
+            .take(self.fft_out.len() - 1)
+            .enumerate()
+            .for_each(|(i, bin_in)| {
+                let unwrapped_phase = i as f32 * TAU + bin_in.arg();
+                let new_phase = unwrapped_phase * self.stretch_factor;
+                let new_frequency = new_phase / TAU;
+                let to_bin = new_frequency.round();
+                let new_phase_principal = new_phase % TAU;
 
-            self.ifft_in[to_bin as usize] = Complex::from_polar(bin_in.norm(), new_phase_principal);
-        });
+                self.ifft_in[to_bin as usize] =
+                    Complex::from_polar(bin_in.norm(), new_phase_principal);
+            });
 
         let _ = self.ifft_cr.process(&mut self.ifft_in, &mut self.ifft_out); // .unwrap();
 
@@ -162,13 +142,13 @@ impl Stretch {
 #[cfg(test)]
 mod test {
     use super::*;
-    use realfft::RealFftPlanner;
+    use crate::util;
 
     #[test]
     fn test_stretch_buffer() {
         const SAMPLE_RATE: usize = 1000;
         const FRAME_TIME: f32 = 0.50;
-        const STRETCH_FACTOR: f32 = 1.0;
+        const STRETCH_FACTOR: f32 = 2.0;
         const IN_LEN: usize = (FRAME_TIME * (SAMPLE_RATE as f32)) as usize;
 
         let mut stretch = Stretch::new(SAMPLE_RATE, FRAME_TIME, STRETCH_FACTOR);
@@ -189,16 +169,23 @@ mod test {
             (stretch.fft_in.len() as f32 * stretch.stretch_factor) as usize
         );
 
-        const NR_IN_SAMPLES: usize = 20;
+        const NR_IN_SAMPLES: usize = 500;
         const NR_OUT_SAMPLES: usize = (NR_IN_SAMPLES as f32 * STRETCH_FACTOR) as usize;
 
-        let in_samples = gen_sin(100.0, 1000, NR_IN_SAMPLES);
+        let in_samples = util::gen_sin(100.0, 1000, NR_IN_SAMPLES);
         let mut out_samples = [0.0; NR_OUT_SAMPLES];
         stretch.stretch(&in_samples, &mut out_samples);
-        assert_eq!(
-            stretch.in_buffer[0..IN_LEN - NR_IN_SAMPLES],
-            [0.0; IN_LEN - NR_IN_SAMPLES]
-        );
+        println!("1st iteration out {:?}", out_samples);
+
+        stretch.stretch(&in_samples, &mut out_samples);
+        println!("2nd iteration out {:?}", out_samples);
+
+        util::write_csv(&out_samples, &"2nd.data");
+
+        // assert_eq!(
+        //     stretch.in_buffer[0..IN_LEN - NR_IN_SAMPLES],
+        //     [0.0; IN_LEN - NR_IN_SAMPLES]
+        // );
         // assert_eq!(stretch.in_buffer[IN_LEN - NR_IN_SAMPLES..], in_samples);
 
         // const NR_IN_SAMPLES_2: usize = 40;
@@ -224,99 +211,5 @@ mod test {
 
         // // stretch.stretch(&in_samples_2, &mut out_samples_2);
         // // stretch.stretch(&in_samples_2, &mut out_samples_2);
-    }
-
-    #[test]
-    fn test_gen_sin() {
-        let sin = gen_sin(10_000.0, 48000, 1000);
-
-        write_csv(&sin, &"sin_f32.data");
-    }
-
-    #[test]
-    fn push() {
-        let mut v = vec![];
-        v.push(3);
-        v.push(2);
-        v.push(1);
-        v.push(0);
-        println!("v {:?}", v);
-    }
-
-    #[test]
-    fn test_realfft() {
-        const FS: usize = 1000;
-        let f = 15.0;
-
-        let mut in_data = gen_sin(f, FS, FS);
-        write_csv(&in_data, &"in.data");
-
-        let mut planner = RealFftPlanner::new();
-        let fft_r2c = planner.plan_fft_forward(FS);
-        let mut in_fft = fft_r2c.make_output_vec();
-
-        fft_r2c.process(&mut in_data, &mut in_fft).unwrap();
-
-        println!(
-            "in data length {}, in fft length {}",
-            in_data.len(),
-            in_fft.len()
-        );
-
-        let fft_norm: Vec<_> = in_fft.iter().map(|c| c.norm() / FS as f32).collect();
-        write_csv(&fft_norm, &"in-fft-norm.data");
-
-        // naive time stretching
-        let stretch = 2.5;
-        let stretch_len = (FS as f32 * stretch) as usize;
-        let ifft_cr = planner.plan_fft_inverse(stretch_len);
-        let mut ifft_spectrum = ifft_cr.make_input_vec(); // zeroes
-        let mut ifft_data = ifft_cr.make_output_vec();
-        println!(
-            "ifft_data length {}, spectrum2 (stretched) length {}",
-            ifft_data.len(),
-            ifft_spectrum.len()
-        );
-
-        // stretch time
-        in_fft.iter().enumerate().for_each(|(i, bin_in)| {
-            let unwrapped_phase = i as f32 * TAU + bin_in.arg();
-            let new_phase = unwrapped_phase * stretch;
-            let new_frequency = new_phase / TAU;
-            let to_bin = new_frequency.round();
-            let new_phase_principal = new_phase % TAU;
-
-            ifft_spectrum[to_bin as usize] =
-                Complex::from_polar(bin_in.norm(), new_phase_principal);
-
-            // println!(
-            //     "i {}, to_bin {}, left {}, right {}, left_weight {}, right_weight {}",
-            //     i, to_bin, left, right, left_weight, right_weight
-            // );
-        });
-
-        let fft_norm2: Vec<_> = ifft_spectrum
-            .iter()
-            .map(|c| c.norm() / stretch_len as f32)
-            .collect();
-
-        write_csv(&fft_norm2, &"stretched-fft-norm.data");
-
-        let _ = ifft_cr.process(&mut ifft_spectrum, &mut ifft_data); // .unwrap();
-
-        write_csv(&ifft_data, &"stretched.data");
-
-        // and back again
-        let fft_r2c = planner.plan_fft_forward(FS);
-        let mut spectrum = fft_r2c.make_output_vec();
-
-        fft_r2c
-            .process(&mut ifft_data[0..FS], &mut spectrum)
-            .unwrap();
-        let fft_norm: Vec<_> = spectrum
-            .iter()
-            .map(|c| c.norm() / stretch_len as f32)
-            .collect();
-        write_csv(&fft_norm, &"stretched-data-fft-norm.data");
     }
 }

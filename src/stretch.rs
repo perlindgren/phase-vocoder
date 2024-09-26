@@ -3,6 +3,8 @@ use rustfft::{num_complex::Complex, num_traits::Zero};
 
 use std::{f32::consts::TAU, sync::Arc};
 
+use crate::window;
+
 // Following the ideas for a phase vocoder, along following steps
 //
 // 1) incoming samples are stored in an frame buffer holding the latest N samples
@@ -78,9 +80,17 @@ impl Stretch {
     // ifft_out               |f32, f32, ...                    | (out_frame_size)
     //
     pub fn stretch(&mut self, in_samples: &[f32], out_samples: &mut [f32]) {
-        assert!((in_samples.len() as f32 * self.stretch_factor) as usize == out_samples.len());
+        // assert_eq!(
+        //     (in_samples.len() as f32 * self.stretch_factor) as usize,
+        //     out_samples.len()
+        // );
         // push in_samples into buffer
         let in_buffer_len = self.in_buffer.len();
+        println!(
+            "in_samples.len() {}, in_buffer_len {}",
+            in_samples.len(),
+            in_buffer_len
+        );
         // check that in_samples fit in buffer
         assert!(in_samples.len() <= in_buffer_len);
 
@@ -88,7 +98,8 @@ impl Stretch {
         self.in_buffer.copy_within(in_samples.len().., 0);
         self.in_buffer[in_buffer_len - in_samples.len()..].copy_from_slice(in_samples);
 
-        self.fft_in.copy_from_slice(&self.in_buffer);
+        // self.fft_in.copy_from_slice(&self.in_buffer);
+        self.fft_in = window::hann_window(&self.in_buffer);
 
         self.fft_r2c
             .process(&mut self.fft_in, &mut self.fft_out)

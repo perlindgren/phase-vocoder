@@ -8,7 +8,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Sample,
 };
-use phase_vocoder::stretch::Stretch;
+use phase_vocoder::stretch::{self, Stretch};
 use rodio::{Decoder, Source};
 use std::path::Path;
 use std::time::Duration;
@@ -40,24 +40,25 @@ fn play(device: &cpal::Device, file: File) {
 
     let config = cpal::StreamConfig {
         sample_rate: cpal::SampleRate(sample_rate),
-        channels: 1, // we want mono channels,
-        buffer_size: cpal::BufferSize::Fixed(4096),
+        channels: 1,                                // we want mono channels,
+        buffer_size: cpal::BufferSize::Fixed(1024), // 256 f32
     };
 
+    let stretch_factor = 1.5;
     println!("sample_rate {}", sample_rate);
-    let mut stretch = Stretch::new(sample_rate as usize, 0.20, 2.0);
+    let mut stretch = Stretch::new(sample_rate as usize, 0.025, stretch_factor);
 
     println!("Config: {:?}", config);
     let err_fn = |err| eprintln!("Error:{}", err);
 
-    let mut in_samples = [0.0f32; 2048];
+    let mut in_samples = [0.0f32; 10000];
 
     let stream = device
         .build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // println!("{}", data.len());
-                let in_slice = &mut in_samples[..data.len() / 2];
+                let in_slice = &mut in_samples[..(data.len() as f32 / stretch_factor) as usize];
+                println!("data len {}, in_slice len {}, ", data.len(), in_slice.len());
                 in_slice
                     .iter_mut()
                     .for_each(|in_s| *in_s = track.next_sample());

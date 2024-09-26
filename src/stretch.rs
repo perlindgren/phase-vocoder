@@ -1,5 +1,5 @@
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
-use rustfft::num_complex::Complex;
+use rustfft::{num_complex::Complex, num_traits::Zero};
 
 use std::{f32::consts::TAU, sync::Arc};
 
@@ -40,6 +40,8 @@ impl Stretch {
     pub fn new(sample_rate: usize, frame_time: f32, stretch_factor: f32) -> Self {
         let mut planner = RealFftPlanner::new();
         let in_frame_size = (frame_time * sample_rate as f32) as usize;
+
+        println!("in_frame_size {}", in_frame_size);
         let out_frame_size = (in_frame_size as f32 * stretch_factor) as usize;
         let fft_r2c = planner.plan_fft_forward(in_frame_size);
         let in_buffer = fft_r2c.make_input_vec();
@@ -81,6 +83,8 @@ impl Stretch {
         let in_buffer_len = self.in_buffer.len();
         // check that in_samples fit in buffer
         assert!(in_samples.len() <= in_buffer_len);
+
+        println!("in_samples {:?}", &in_samples[..10]);
         self.in_buffer.copy_within(in_samples.len().., 0);
         self.in_buffer[in_buffer_len - in_samples.len()..].copy_from_slice(in_samples);
 
@@ -90,6 +94,7 @@ impl Stretch {
             .process(&mut self.fft_in, &mut self.fft_out)
             .unwrap();
 
+        self.ifft_in.iter_mut().for_each(|c| *c = Complex::zero());
         // stretch time
         self.fft_out
             .iter()
@@ -108,34 +113,40 @@ impl Stretch {
 
         let _ = self.ifft_cr.process(&mut self.ifft_in, &mut self.ifft_out); // .unwrap();
 
-        let frame_size = self.ifft_out.len();
+        let in_frame_size = self.fft_in.len();
+        let out_frame_size = self.ifft_out.len();
+        self.ifft_out
+            .iter_mut()
+            .for_each(|r| *r /= in_frame_size as f32);
+
         let hop_size = out_samples.len();
-        let to_index = frame_size - hop_size;
+        let to_index = out_frame_size - hop_size;
 
         println!(
-            "frame_size {}, hop_size {}, to_index {}",
-            frame_size, hop_size, to_index
+            "out_frame_size {}, hop_size {}, to_index {}",
+            out_frame_size, hop_size, to_index
         );
 
         // shift out_accumulator left, out_accumulator.len() = 2 * frame_size
         //       |           |          x| << hop_size
         //       |          x|           |
-        self.out_accumulator.copy_within(frame_size.., to_index);
+        self.out_accumulator.copy_within(out_frame_size.., to_index);
 
         // accumulate old and new
-        self.out_accumulator[frame_size..frame_size + hop_size]
+        self.out_accumulator[out_frame_size..out_frame_size + hop_size]
             .iter_mut()
-            .zip(self.ifft_out[..frame_size - hop_size].iter())
+            .zip(self.ifft_out[..out_frame_size - hop_size].iter())
             .for_each(|(old, new)| {
                 *old = (*old + *new) / 2.0;
             });
 
         // plain copy of new
-        self.out_accumulator[2 * frame_size - hop_size..]
-            .copy_from_slice(&self.ifft_out[frame_size - hop_size..]);
+        self.out_accumulator[2 * out_frame_size - hop_size..]
+            .copy_from_slice(&self.ifft_out[out_frame_size - hop_size..]);
         //
         println!("out_samples_len {}", out_samples.len());
-        out_samples.copy_from_slice(&self.out_accumulator[to_index..frame_size]);
+        out_samples.copy_from_slice(&self.out_accumulator[to_index..out_frame_size]);
+        println!("out_samples {:?}", &out_samples[..10]);
     }
 }
 

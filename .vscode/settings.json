@@ -7,7 +7,9 @@
     "hann",
     "ifft",
     "oversamp",
+    "playhead",
     "realfft",
+    "rodio",
     "rustfft"
   ]
 }

@@ -1,4 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use phase_vocoder::track::Track;
 use std::time::Duration;
 
 fn main() {
@@ -6,7 +7,7 @@ fn main() {
     let device = host.default_output_device().unwrap();
     println!("Output device: {}", device.name().unwrap());
 
-    let mut track = phase_vocoder::track::Track::new(&"./amazing_grace.mp3").unwrap();
+    let mut track = Track::new(&"./amazing_grace.mp3").unwrap();
 
     let config = cpal::StreamConfig {
         sample_rate: cpal::SampleRate(track.sample_rate as u32),

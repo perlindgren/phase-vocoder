@@ -120,10 +120,6 @@ impl Stretch {
     }
 
     pub fn stretch(&mut self, in_samples: &[f32], out_samples: &mut [f32]) {
-        // assert_eq!(
-        //     (in_samples.len() as f32 * self.stretch_factor) as usize,
-        //     out_samples.len()
-        // );
         // push in_samples into buffer
         let in_buffer_len = self.in_buffer.len();
         println!(

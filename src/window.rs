@@ -23,6 +23,16 @@ pub fn hann_window(in_samples: &[f32]) -> Vec<f32> {
     out_samples
 }
 
+#[inline(always)]
+pub fn hann_window_in_place(in_samples: &mut [f32]) {
+    let n = in_samples.len();
+
+    in_samples
+        .iter_mut()
+        .enumerate()
+        .for_each(|(i, in_s)| *in_s = *in_s * 0.5 * (1.0 - (TAU * i as f32 / n as f32).cos()));
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -42,6 +52,14 @@ mod test {
         let out_samples = hann_window(&in_samples);
         assert_eq!(out_samples[0], 0.0);
         assert_eq!(out_samples[32], 1.0);
+    }
+
+    #[test]
+    fn test_hann_in_place() {
+        let mut samples = [1.0; 64];
+        hann_window_in_place(&mut samples);
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[32], 1.0);
     }
 
     #[test]
